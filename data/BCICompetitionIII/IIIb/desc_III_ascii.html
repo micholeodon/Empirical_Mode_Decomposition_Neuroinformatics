@@ -1,0 +1,48 @@
+<!-- responsible for this page is benjamin.blankertz@tu-berlin.de -->
+
+<!doctype html public "-//w3c//dtd html 4.01 transitional//en">
+<html>
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+  <title>Data Sets III in ASCII format for the BCI Competition III</title>
+  <style type="text/css">
+    body { margin-left:5%; margin-right:5% }
+  </style>
+</head>
+<body>
+
+<font face="sans-serif">
+
+<h3 align="center">
+Data sets III - in ASCII format
+</h3>
+
+Each of the original <tt>*.gdf</tt> files is splitted in several
+ASCII files:
+<ul>
+ <li><tt>_s.txt</tt>: continuous EEG signals. Each line represents
+  a time point, each column a channel.</li>
+ <li><tt>_HDR_TRIG.txt</tt>: a vector (length #trials) indicating the start
+  of trials (in unit <i>sample</i>.</li>
+ <li><tt>_HDR_Classlabel.txt</tt>: a vector (length #trials) defining the
+  class labels of all trials. The class label is <tt>NaN</tt> for test
+  trials.</li>
+ <li><tt>_HDR_ArtifactSelection.txt</tt> a vector (length #trials) of
+ boolean values (0/1), a '1' indicating that the respective trials was
+ marked as artifact (see description of the original data).
+ </li>
+</ul>
+
+For test sets there are no <tt>_StimulusType.txt</tt> and no 
+<tt>_TargetCode.txt</tt> files.
+
+
+<p></p>
+<hr />
+
+<p align="center">
+[ <a href="index.html">BCI Competition III - download page</a> ]
+<p/>
+
+</body>
+</html>

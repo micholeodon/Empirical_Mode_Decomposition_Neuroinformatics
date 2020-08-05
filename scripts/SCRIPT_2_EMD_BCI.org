@@ -1,0 +1,765 @@
+#+TITLE: EMD in Neuroinformatics: the BCI Example
+#+AUTHOR: Michał Konrad Komorowski
+#+EMAIL: michu.kom AT gmail DOT com
+#+LANGUAGE:  en
+#+OPTIONS:   H:3 num:nil toc:t \n:nil ::t |:t ^:nil  -:t f:t *:t tex:t d:nil tags:not-in-toc author:t email:t creator:nil ':t timestamp:nil
+#+INFOJS_OPT: view:nil toc:nil ltoc:t tdepth:1 mouse:underline buttons:0 
+
+* Introduction 
+Here we explore the EMD further in MATLAB, following the idea of Hadjileontiadis and Panas from their 2008 paper /"Hilbert-Huang Spectrum as a New Field for the Identification of EEG Event Related De-/Synchronization for BCI applications"/[fn:2]. In the introduction we can read:
+
+#+begin_quote
+/"When the human brain is in a calm and alert state of consciousness, the sensorimotor cortices show rhythmic electroencephalogram (EEG) oscillations, known as mu-rhythm with their frequencies ranging from *8 to 12Hz*. Motor activity, *both actual and imagined*, as well as somatosensory stimulation, *attenuate the mu-rhythm* in a phenomenon known as *Event Related Desynchorization (ERD)*. After the motor activity is stopped, the mu-rhythm rebounds and this phenomenon is known as *Event Related Synchronization (ERS)*. The mu-rhythm during ERS is usually higher than during calm states of consciousness."/
+#+end_quote
+
+We now try to explore this phenomenon taking the *BCI Competition IIIb dataset* (eng. /BCI - Brain Computer Interface/). The goal of the BCI is to use EEG signal to control computer application in order to perform some predefinied task. 
+
+Brief description of the dataset is available in [[file:/media/michak/DataDrive/science/phd_stud/4_ROK/ANSYG_wspolprowadzenie_TP/EMD_materials/data/BCICompetitionIII/IIIb/desc_IIIb.pdf][data description]] file. Read it know to familiarize with the experiment context and terminology used further.
+
+--------
+*Warning !* 
+Sadly, it turned out that dataset in the paper is DIFFERENT BCI Competition III, not available anymore - check by yourself: http://ida.first.fraunhofer.de/projects/bci/competition_iii/ .
+Dataset we are using here is almost the same. It is described in the website: http://www.bbci.de/competition/iii/#data_set_iiib . This data is no longer sended after submitting download form, however I know somebody that had downloaded it - data with description is available in [[file:/media/michak/DataDrive/science/phd_stud/4_ROK/ANSYG_wspolprowadzenie_TP/EMD_materials/data/BCICompetitionIII.zip][the archive]].
+--------
+
+
+For a great explanation of the Empirical Mode Decomposition and Hilbert Spectrum see [Huang et al 1996][fn:1].
+
+* Goal
+We would like to try guess *which of the trial class belong to which movement type - left or right*. In the dataset there is no definition of which class belongs to what type of movement (left or right), however we can make an attempt to guess it from the brain electrical activity. From theory we know that mu-rhythm suppression occurs in the contralateral brain hemisphere to the side of the moved limb - right hand movement will result in the ERD in the left hemisphere, and vice-versa.
+We will utilize the Empirical Mode Decomposition to address the non-stationary nature of the EEG signal.
+
+-------
+*Plan*:
+1. Bandpass filter the EEG signal into 7-13 Hz (mu-band),
+2. Extract band-limited signal components (Intrinsic Mode Functions - IMFs) using EMD,
+3. Look at the IMFs and corresponding Hilbert Spectra in order to find sudden drop of power after 3 s from trial onset,
+4. We should see ERD in only one class of trials, while the other class will not show ERD,
+5. Detected movement type is contralateral to the site of the EEG electrode (e.g. ERD at *C3* electrode corresponds to *right* limb movement and vice-versa).
+-------
+
+* Used files
+
+** Data - BCI Competition IIIb (http://www.bbci.de/competition/iii/#data_set_iiib)
+- =S4b.mat= , =X11b.mat= - EEG signal from two subjects
+- =true_labels_S4.txt=, =true_labels_X11.txt= - trial class labels
+** MATLAB =.m= files
+ - =emd1.m= - advanced function for ERD decomposition accounting for the edge artifacts (written by G.Rilling in 2007 - [[https://www.mathworks.com/matlabcentral/fileexchange/74267-qrs-peak-detection-in-ecg][link]])
+ - =findpeaks2.m= - function for simple maxima detection
+ - =corr_no_mean.m= - function for calculating the correlation-like coefficient between two signals 
+
+* SCRIPT
+
+We start as usual clearing the workspace and adding paths to used external functions/toolboxes.
+
+#+BEGIN_SRC matlab :tangle 00_file.m
+clear; close all; clc;
+
+addpath plot_hht_modified/
+#+END_SRC
+
+Select the subject for further analysis and load its EEG signal from C3 and C4 electrode. Read some basic informations like sampling time and frequency, time axis, number of samples. We would also like to read the trial labels. We will explore S4 subject first.
+
+#+BEGIN_SRC matlab :tangle 01_file.m
+%% load signal and load true labels
+
+SUBJECT = 'S4';  %'S4' or 'X11'
+% We are ignoring O3VR subject, because half of the trials are not used 
+% accroding to true_labels_O3VR.txt. We want to avoid complications and 
+% focus on the idea.
+
+load(['../data/BCICompetitionIII/IIIb/', SUBJECT,'b_mat/', SUBJECT, 'b.mat'])
+
+C3a_C3p = s(:,1)';
+C4a_C4p = s(:,2)';
+Fs = HDR.SampleRate;
+dt = 1/Fs;
+N = numel(C3a_C3p);
+t = 0:dt:(N-1)*dt;
+
+trigLabels = csvread(['../data/BCICompetitionIII/IIIb/true_labels_', SUBJECT,'.txt']);
+
+% fill NaN labels (test trials) with correct labels
+m = zeros(1,N);
+m(HDR.TRIG) = trigLabels; 
+
+#+END_SRC
+
+Select the electrode that you want to explore. Here we would like to explore left hemisphere first so we are assigning C3 signal to the =x= variable.
+
+#+BEGIN_SRC matlab :tangle 02_file.m
+%% SELECT left or right channel for further analysis
+x = C3a_C3p; % left hemisphere
+% x = C4a_C4p; % right hemisphere
+#+END_SRC
+
+Code below will be an overview of the situation.
+
+#+BEGIN_SRC matlab :tangle 03_file.m
+%% see the overview
+m1 = m; m1(find(m==1)) = 1; m1(find(m~=1)) = 0; 
+m2 = m; m2(find(m==2)) = 2; m2(find(m~=2)) = 0; 
+plot(t,x,'k')
+hold on
+stem(t,m1*12,'r') % times 12 for visibility
+stem(t,m2*12,'g')
+hold off
+legend({'sig','1','2'})
+xlabel Sample
+ylabel Amplitude
+title('Signal and trial triggers indicated for each class')
+#+END_SRC
+
+We shall see something like this:
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_sig_S4_C3_whole.png]]
+
+C3 electrode signal from subject S4 contains over 9000-second recording (almost 3 hours of recording).
+When we zoom in we can see red and green stems corresponding to the beggining of each trial. Red stems mark class 1 and Green stems mark class 2 trials:
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_sig_S4_C3_whole_zoom.png]]
+
+
+We now divide the whole signal into 1080 segments accroding to trial markers:
+
+#+BEGIN_SRC matlab :tangle 04_file.m
+%% store each trial separately for further processing
+beg = HDR.TRIG;
+nTrials = numel(beg);
+nanTrialsIdx = [];
+for iTrial = 1:nTrials
+    label = trigLabels(iTrial);
+    
+    if(iTrial+1 <= nTrials)
+        seg = x(beg(iTrial):beg(iTrial+1));
+    else
+        seg = x(beg(iTrial):end); % last trial
+    end
+    
+    allSegments{iTrial} = seg;
+    
+    % mark trials containing nans
+    if(any(isnan(seg)))
+        nanTrialsIdx = [nanTrialsIdx, iTrial];
+    end
+end
+#+END_SRC
+
+
+That is all we need to start exploring IMFs of the signal. Apply 7-14 Hz bandpass filtering before running EMD to narrow down the attention to frequencies of interest - the mu-rhythm.
+Let's check for example trial no 30 which belong to class 1:
+
+#+BEGIN_SRC matlab :tangle 05_file.m
+%% EMD on selected trial
+selectedTrial = 30; % trial 30 belongs to class 1 (S4)
+
+s = allSegments{selectedTrial};
+N = numel(s);
+t = 0:dt:(N-1)*dt; % individual trial axis
+
+
+% uncomment if you want to apply bandpass filter 7-13 Hz before EMD
+fa = 7; fb = 13;
+[b,a] = butter(10,[fa fb]/(Fs/2));
+x = filter(b,a,s);
+% cwt(s,Fs) % check T-F if you like
+
+[IMF, ~, ~] = emd1(s);
+#+END_SRC
+
+
+Now =IMF= variable contains 9 components. We can plot them:
+
+#+BEGIN_SRC matlab :tangle 06_file.m
+%% plot all IMFs from selected trial
+nIMFs = size(IMF,1);
+nPlots = nIMFs + 1;
+
+h_all = figure;
+for iPlot = 1:nPlots
+    iIMF = iPlot-1;
+    if iPlot == 1
+        subplot(nPlots,1,iPlot)
+        plot(t,s,'r');
+        title(['signal (trial = ', num2str(selectedTrial),')'])
+        grid on
+    else
+        subplot(nPlots,1,iPlot)
+        plot(t, IMF(iIMF,:))
+        title(['IMF no: ', num2str(iIMF)])
+        grid on
+    end % if iPlot == 1
+end % iPlot
+#+END_SRC
+
+and we should get this:
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_S4_C3_t30_IMF.png]]
+
+
+Let's check Hilbert Spectrum of it:
+
+#+BEGIN_SRC matlab :tangle 07_file.m
+figure
+for SELECTED_IMF = 1:(size(IMF,1)-1) % we drop last residual because it is overpowering according to Huang
+    I = IMF(SELECTED_IMF,:);
+    % analytic signal
+    z = hilbert(I); % WATCH OUT ! hilbert do not calculate hilbert transform but already an analytic signal !
+    % instantaneous amplitude
+    a = abs(z);
+    % instantaeous energy
+    e = a.^2;
+    % instantaneuos phase
+    th = angle(z);
+    % instantaneous frequency
+    f = 1/(2*pi)*diff(th)/dt;
+    
+    timeAxis = linspace(0,(N-2)*dt,N-1); % one sample lost during diff
+    
+    % color by component
+%     plot(timeAxis, f, '.') 
+
+    % color by energy
+      scatter(timeAxis, f, 10, e(1:(N-1)), 'filled')
+      set(gca,'color',[0 0 0])
+
+    hold on
+end
+hold off
+cmap = hot;
+colormap(cmap)
+colorbar
+xlabel('Time [s]');
+ylabel('Frequency');
+xlim([0 timeAxis(end)])
+%--- linear scale of Y
+ylim([0 0.5*Fs]);
+%--- log scale of Y
+% set(gca, 'YScale','log')
+% ylim([1 0.5*Fs])
+%---
+title(['Hilbert Spectrum (trial = ', num2str(selectedTrial),')'])
+#+END_SRC
+
+We shall see:
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_S4_C3_t30_HHT.png]]
+
+
+It seems that there is no evident ERD after 3 s, both when we look at two major IMFs (1 and 2) and Hilbert Spectrum.
+Let's take several trials for both classes to have a look on what is happening. 
+
+Trial 50 (class 1 again)
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_S4_C3_t50_IMF.png]]
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_S4_C3_t50_HHT.png]]
+
+Again no obvious ERD.
+
+Trial 34 (class 1 again):
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_S4_C3_t34_IMF.png]]
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_S4_C3_t34_HHT.png]]
+
+It looks like evident ERD, which is somewhat contrary to the previous trials from that class.
+
+Trial 73 (class 1):
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_S4_C3_t73_IMF.png]]
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_S4_C3_t73_HHT.png]]
+
+Again evident ERD. 
+Examining further class 1 one would see many examples with ERD and many without. We know according to the theory that one class SHOULD exhibit mu-rhythm suppression because one of the trial types corresponds to the movement of the right hand (recall: contralateral to the C3 electrode which covers left hemisphere). Analogous situation occurs when we explore class 2.
+
+Example trials with ERD present:
+
+33
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_S4_C3_t33_IMF.png]]
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_S4_C3_t33_HHT.png]]
+
+63
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_S4_C3_t63_IMF.png]]
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_S4_C3_t63_HHT.png]]
+
+
+Example trials without ERD present:
+
+20 
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_S4_C3_t20_IMF.png]]
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_S4_C3_t20_HHT.png]]
+
+47
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_S4_C3_t47_IMF.png]]
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_S4_C3_t47_HHT.png]]
+
+We cannot draw any firm conlusion, so we need an "averaged" look on the data.
+For classroom exercise, investigation presented above could be sufficient to show the application of the EMD in the field of neuroinformatics, however below there are some optional explorations if we pursue the answer of question "which class belongs to right/left movement?".
+
+
+* SUPPLEMENTARY ANALYSIS
+
+First, we can confirm that there is no clear correspondence of the ERD to one of two classes, by looking on the concatenated IMF of the whole signal overlapped with the class labels.
+Let's start with constructing two class indicator functions:
+
+#+BEGIN_SRC matlab :tangle 08_file.m
+disp('Indicators ...')
+% indicator signal for class 1
+I_1 = [];
+% indicator signal for class 2
+I_2 = [];
+
+nFirstTrials = nTrials; 
+
+for iTrial = 1:nFirstTrials
+    label = trigLabels(iTrial);
+    L = numel(allSegments{iTrial});
+    
+    % decide which class
+    switch label
+        case 1
+            I_1 = [I_1 ones(1,L)];
+            I_2 = [I_2 zeros(1,L)];
+        case 2
+            I_1 = [I_1 zeros(1,L)];
+            I_2 = [I_2 ones(1,L)];
+
+        otherwise
+            error('unrecognized trial label!')
+    end
+
+end
+figure
+area(1:numel(I_1),I_1*100,'FaceColor','r','FaceAlpha',0.3)
+hold on
+area(1:numel(I_2),I_2*100,'FaceColor','g','FaceAlpha',0.3)
+hold off
+xlabel('Sample')
+legend({'1','2'})
+title('Timeline with indicated class')
+#+END_SRC
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_indicators.png]]
+
+
+Then we would select first IMF (because it contains most of the power from the mu band) and compute its energy. We also calculate its upper envelope to make visual inspection easier. Additionaly there is an estimation of the instantaneuos frequency to check that indeed selected IMF is in the mu-band (7-13 Hz) most of the time.
+
+#+BEGIN_SRC matlab :tangle 09_file.m
+%% calc energy envelope of selected IMF
+SELECTED_IMF = 1;
+nFirstTrials = nTrials; % limit number of trials for faster exploration or take all (nTrials)
+
+disp('Energy ...')
+E = [];
+F = [];
+IMF_all = [];
+count1 = 0;
+count2 = 0;
+for iTrial = 1:nFirstTrials
+    disp([num2str(iTrial), ' / ', num2str(nFirstTrials)]);
+    s = allSegments{iTrial};
+    N = numel(s);
+
+     if(any(isnan(s)))
+         E = [E, nan(1,N)];
+     else                 
+         % uncomment if you want to apply bandpass filter 7-13 Hz before EMD
+         fa = 7; fb = 13;
+         [b,a] = butter(10,[fa fb]/(Fs/2));
+         s = filter(b,a,s);
+         
+         [IMF, ~, ~] = emd1(s);
+         imf = IMF(SELECTED_IMF,:);
+%          imf = IMF(selectedIMF,:)+IMF(selectedIMF+1,:); % maybe take two neighbouring IMFs?
+         
+        % separate imfs from different class for further averaging
+        label = trigLabels(iTrial);
+        switch label
+            case 1
+                count1 = count1+1;
+                class_1_IMFs_nFirstTrials{count1} = imf;
+            case 2
+                count2 = count2+1;
+                class_2_IMFs_nFirstTrials{count2} = imf;          
+            otherwise
+                error('unrecognized trial label!')
+        end
+
+         E = [E, imf.^2];
+         
+         % extract also frequency to verify that you are looking on right oscillations       
+         f = 1/(2*pi)*diff(angle(hilbert(imf)))/dt;
+         F = [F, f];
+     end
+end
+
+disp('OK')
+#+END_SRC
+
+For finding envelope let's write short function for finding maxima of the signal:
+
+#+BEGIN_SRC matlab :tangle findpeaks2.m
+function n = findpeaks2(x)
+% Find peaks.
+% n = findpeaks(x)
+
+n    = find(diff(diff(x) > 0) < 0);
+u    = find(x(n+1) > x(n));
+n(u) = n(u)+1;
+#+END_SRC
+
+Plot this envelope on top of the class indicator functions:
+
+#+BEGIN_SRC matlab :tangle 10_file.m
+%% plot IMF envelope overlapped with the class label indicators
+% upper energy envelope
+p = findpeaks2(E);
+emax = spline([0 p numel(E)+1],[0 E(p) 0], 1:numel(E));
+
+% plot to check
+figure
+plot(1:numel(emax),emax,'k')
+hold on
+area(1:numel(I_1),I_1*100,'FaceColor','r','FaceAlpha',0.3)
+area(1:numel(I_2),I_2*100,'FaceColor','g','FaceAlpha',0.3)
+hold off
+legend({'env','1','2'})
+title(['Energy envelope of IMF no', num2str(SELECTED_IMF), ' and class indicators (nFirstTrials)'])
+#+END_SRC
+
+We should get:
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_indicators_IMF.png]]
+
+(Large spikes are the result of the cubic spline approximation between the ends of the series of NaN values. Cubic spline approximation is needed for obtaining the envelope, but they are not used for further calculations to avoid introduction of huge biases)
+
+Zoom:
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_indicators_IMF_zoom.png]]
+
+
+We can visualize instantaneuos frequency calculated before:
+
+#+BEGIN_SRC matlab :tangle 11_file.m
+%% check IMF frequency
+figure
+plot(1:numel(F),F)
+ylabel('Frequency [Hz]')
+xlabel Sample
+title(['Instantaneuous frequency of IMF no',  num2str(SELECTED_IMF), ' (nFirstTrials)'])
+#+END_SRC
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_IMF_freq.png]]
+
+Indeed, our IMF is in the mu band most of the times.
+
+
+Visual examination would be laborous, so let's correlate IMF energy with the indicator functions.
+Indicator function less correlated with the IMF energy is a hallmark of ERD happening more often of the corresponding class.
+
+#+BEGIN_SRC matlab :tangle 12_file.m
+%% correlations 
+r1 = corr(E',I_1', 'Rows', 'complete') %  'Rows', 'complete' to omit NaNs
+r2 = corr(E',I_2', 'Rows', 'complete')
+#+END_SRC
+
+We got value =r1 = -0.0131= for class 1 and =r2 = 0.0131= for class 2, which does not help at to make decision. Negative value occured because in the correlation computation we need to substract the mean of the signal, thus introducing negative values. If we omit that mean substraction we would get "correlation-like" coefficient which will have only positive values.
+
+Use function:
+
+#+BEGIN_SRC matlab :tangle corr_no_mean.m
+function c = corr_no_mean(x, y)
+
+norm_x = nansum(abs(x).^2)^(1/2);
+norm_y = nansum(abs(y).^2)^(1/2);
+c = nansum(x.*y)/(norm_x*norm_y);
+#+END_SRC
+
+Compute correlation-like coeffictients:
+
+#+BEGIN_SRC matlab :tangle 13_file.m
+%% correlation-like coefficients
+% Negative correlation make it difficult to interpret, 
+% so omit substracting mean when calculating correlation.
+% Thus the lower q the more mu desynchronization is correlated to class label
+q1 = corr_no_mean(E, I_1)
+q2 = corr_no_mean(E, I_2)
+#+END_SRC
+
+We got =q1 = 0.2875= for class 1 and =q2 = 0.3075= for class 2.
+The difference is slight, sugessting that class 1 contains more ERDs than class 2. This could mean that class 1 may represent right limb movement (or its imaginary) which was discovered from light hemisphere signal (C3 electrode). As result it would mean that during class 2 trials subject was moving/imaginig left limb movement.
+
+To confirm that we can do two things:
+1) See the signal energy averaged across trials (for each class separately)
+2) See the IMF energy averaged across trials (for each class separately)
+
+
+Let's do 1). 
+
+First separate classes:
+
+#+BEGIN_SRC matlab :tangle 14_file.m
+%% divide for two classes
+beg = HDR.TRIG;
+nTrials = numel(beg);
+count1 = 0;
+count2 = 0;
+nanTrialsIdx = [];
+for iTrial = 1:nTrials
+    label = trigLabels(iTrial);
+    
+    seg = allSegments{iTrial};
+
+    % STORE SEPARATELY for further averaging
+    % uncomment to remove trials with nan values (emd wont process them)
+    if(any(isnan(seg)))
+        continue;
+    end
+    
+    % decide to which cell store
+    switch label
+        case 1
+            count1 = count1+1;
+            class_1{count1} = seg;
+        case 2
+            count2 = count2+1;
+            class_2{count2} = seg;
+        otherwise
+            error('unrecognized trial label!')
+    end
+end
+#+END_SRC
+
+Second, average the signal and plot:
+
+#+BEGIN_SRC matlab :tangle 15_file.m
+%% look on averaged signal energy from all trials
+
+numberOfSeconds = 8;
+av_class_1 = zeros(1, numberOfSeconds*Fs);
+nSeg = numel(class_1)
+for iSeg = 1:nSeg
+    av_class_1 = av_class_1 + class_1{iSeg}(1:(numberOfSeconds*Fs));
+end
+av_class_1_E = (av_class_1/nSeg).^2;
+
+av_class_2 = zeros(1, numberOfSeconds*Fs);
+nSeg = numel(class_2)
+for iSeg = 1:nSeg
+    av_class_2 = av_class_2 + class_2{iSeg}(1:(numberOfSeconds*Fs));
+end
+av_class_2_E = (av_class_2/nSeg).^2;
+
+
+figure
+t = 0:dt:(numberOfSeconds-dt);
+plot(t, av_class_1_E,'r')
+hold on
+plot(t, av_class_2_E,'g')
+hold off
+legend({'av energy 1', 'av energy 2'})
+xlabel('Time from trial onset [s]')
+title('Averaged trials signal energy')
+ylabel('Energy')
+
+#+END_SRC
+
+We should see:
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_S4_C3_sig_avg.png]]
+
+We can see from about t=3.5s the class 1 is actually a power decrease comparing to class 2 supporting our observations from q-coefficients. However it may be related to other frequencies than mu (as we here refer to the non-filtered signal) and this is endeed true.
+Let's filter our signal prior to calculating the average value:
+
+#+BEGIN_SRC matlab :tangle 16_file.m
+%% check signal average power after 7-13 Hz bandpass filtration
+fa = 7; fb = 13;
+[b,a] = butter(10,[fa fb]/(Fs/2));
+
+numberOfSeconds = 8;
+av_class_1 = zeros(1, numberOfSeconds*Fs);
+nSeg = numel(class_1)
+for iSeg = 1:nSeg
+    x = class_1{iSeg}(1:(numberOfSeconds*Fs));
+    y = filter(b,a,x);
+    av_class_1 = av_class_1 + y;
+end
+av_class_1_E = (av_class_1/nSeg).^2;
+
+av_class_2 = zeros(1, numberOfSeconds*Fs);
+nSeg = numel(class_2)
+for iSeg = 1:nSeg
+    x = class_2{iSeg}(1:(numberOfSeconds*Fs));
+    y = filter(b,a,x);
+    av_class_2 = av_class_2 + y;
+end
+av_class_2_E = (av_class_2/nSeg).^2;
+
+figure
+t = 0:dt:(numberOfSeconds-dt);
+plot(t, av_class_1_E,'r')
+hold on
+plot(t, av_class_2_E,'g')
+hold off
+legend({'av energy 1', 'av energy 2'})
+xlabel('Time from trial onset [s]')
+title('Averaged FILTERED trials signal energy')
+ylabel('Energy')
+#+END_SRC
+
+
+Now the distinction is not that clear in favour of any of the classes:
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_S4_C3_filtered_sig_avg.png]]
+
+Now this power drop seems not so convincing.
+
+
+Compute the average of the selected IMF:
+
+#+BEGIN_SRC matlab :tangle 17_file.m
+%% look on averaged selected IMF energy from all trials
+numberOfSeconds = 8;
+av_IMF_class_1 = zeros(1, numberOfSeconds*Fs);
+
+nSeg = numel(class_1_IMFs_nFirstTrials);
+av_IMF_class_1 = zeros(1, numberOfSeconds*Fs);
+for iSeg = 1:nSeg
+    av_IMF_class_1 = av_IMF_class_1 + class_1_IMFs_nFirstTrials{iSeg}(1:(numberOfSeconds*Fs));
+end
+av_IMF_class_1_E = (av_IMF_class_1/nSeg).^2;
+
+nSeg = numel(class_2_IMFs_nFirstTrials);
+av_IMF_class_2 = zeros(1, numberOfSeconds*Fs);
+for iSeg = 1:nSeg
+    av_IMF_class_2 = av_IMF_class_2 + class_2_IMFs_nFirstTrials{iSeg}(1:(numberOfSeconds*Fs));
+end
+av_IMF_class_2_E = (av_IMF_class_2/nSeg).^2;
+
+% upper energy envelopes of envelopes
+p = findpeaks2(av_IMF_class_1_E);
+emax_1 = spline([0 p numel(av_IMF_class_1_E)+1],[0 av_IMF_class_1_E(p) 0], 1:numel(av_IMF_class_1_E));
+p = findpeaks2(av_IMF_class_2_E);
+emax_2 = spline([0 p numel(av_IMF_class_2_E)+1],[0 av_IMF_class_2_E(p) 0], 1:numel(av_IMF_class_2_E));
+
+figure
+t = 0:dt:(numberOfSeconds-dt);
+plot(t, av_IMF_class_1_E,'r')
+hold on
+plot(t, av_IMF_class_2_E,'g')
+plot(t, emax_1, 'r','LineWidth',5);
+plot(t, emax_2, 'g','LineWidth',5);
+hold off
+legend({'av energy 1', 'av energy 2'})
+xlabel('Time from trial onset [s]')
+ylabel('Energy')
+title('Averaged trials selected IMF energy')
+#+END_SRC
+
+
+And the result is very similar:
+
+#+attr_html: :width 1000px
+#+attr_latex: :width 1000px
+[[./img/BCI_S4_C3_IMF_avg.png]]
+
+
+So in conclusion for the electrode C3 for subject S4 average signal energy analysis in the mu-band as well q-coefficients values made no clear distinction between two trial classes.
+
+
+Then one should repeat all the above analyses for another electrode C4 and then for subject X11.
+Table below conclude all the findings:
+
+|------------------------------------------------------+---------------+---------------+---------------+--------|
+| *Subject*                                            |          *S4* |               |         *X11* |        |
+|------------------------------------------------------+---------------+---------------+---------------+--------|
+| *Electrode*                                          |          *C3* |          *C4* |          *C3* |   *C4* |
+|------------------------------------------------------+---------------+---------------+---------------+--------|
+| q1                                                   |        0.2875 |        0.2694 |        0.2660 | 0.2679 |
+| q2                                                   |        0.3075 |        0.2987 |        0.2711 | 0.2622 |
+|------------------------------------------------------+---------------+---------------+---------------+--------|
+| ERD  class sugested by q1 and q2                     |             1 |             1 |             1 |      2 |
+|------------------------------------------------------+---------------+---------------+---------------+--------|
+| *Energy drop after t=3s more promient for class ...* |               |               |               |        |
+|------------------------------------------------------+---------------+---------------+---------------+--------|
+| signal mean energy                                   |             1 |             2 |             1 |      2 |
+| filtered (7-13 Hz) signal mean                       | no difference |             1 |             2 |      2 |
+| first IMF mean energy                                | no difference | no difference | no difference |      2 |
+|------------------------------------------------------+---------------+---------------+---------------+--------|
+
+The results are not consistent, so we cannot draw any definitive conclusion.
+
+
+* CONCLUSIONS
+
+As we see can technique presented in Hadjileontiadis and Panas 2008 paper can show Event Related Desynchronisation / Synchronization however we cannot infer the type of the movement. Assuming above research method is correct, two possible explanations are possible:
+- class labels provided by the organizers of the BCI Competition IIIb are not corresponding to right/left movement,
+- EMD is not able to solve 2-class motor imagery classification problem for this dataset
+
+* Footnotes
+
+[fn:2] K. I. Panoulas, L. J. Hadjileontiadis, and S. M. Panas, “Hilbert-Huang Spectrum as a new field for the identification of EEG event related de-/synchronization for BCI applications,” in 2008 30th Annual International Conference of the IEEE Engineering in Medicine and Biology Society, Aug. 2008, pp. 3832–3835, doi: 10.1109/IEMBS.2008.4650045.
+
+
+[fn:1] N. E. Huang et al., “The empirical mode decomposition and the Hilbert spectrum for nonlinear and non-stationary time series analysis,” Proceedings of the Royal Society of London. Series A: Mathematical, Physical and Engineering Sciences, vol. 454, no. 1971, pp. 903–995, Mar. 1998, doi: 10.1098/rspa.1998.0193.
+
+
+
