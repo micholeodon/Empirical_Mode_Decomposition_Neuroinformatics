@@ -19,7 +19,7 @@ Brief description of the dataset is available in [[file:../data/BCICompetitionII
 --------
 *Warning !* 
 Sadly, it turned out that dataset in the paper is DIFFERENT BCI Competition III, not available anymore - check by yourself: http://ida.first.fraunhofer.de/projects/bci/competition_iii/ .
-Dataset we are using here is almost the same. It is described in the website: http://www.bbci.de/competition/iii/#data_set_iiib . This data is no longer sended after submitting download form, however I know somebody that had downloaded it - data with description is available in [[file:/media/michak/DataDrive/porfolio_github/Empirical_Mode_Decomposition_Neuroinformatics/data/BCICompetitionIII.zip][the archive]].
+Dataset we are using here is almost the same. It is described in the website: http://www.bbci.de/competition/iii/#data_set_iiib . This data is no longer sended after submitting download form, however I know somebody that had downloaded it - data with description is available in [[file:../data/BCICompetitionIII.zip][the archive]].
 --------
 
 
