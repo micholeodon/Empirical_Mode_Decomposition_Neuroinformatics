@@ -14,12 +14,12 @@ Here we explore the EMD further in MATLAB, following the idea of Hadjileontiadis
 
 We now try to explore this phenomenon taking the *BCI Competition IIIb dataset* (eng. /BCI - Brain Computer Interface/). The goal of the BCI is to use EEG signal to control computer application in order to perform some predefinied task. 
 
-Brief description of the dataset is available in [[file:/media/michak/DataDrive/science/phd_stud/4_ROK/ANSYG_wspolprowadzenie_TP/EMD_materials/data/BCICompetitionIII/IIIb/desc_IIIb.pdf][data description]] file. Read it know to familiarize with the experiment context and terminology used further.
+Brief description of the dataset is available in [[file:/media/michak/DataDrive/porfolio_github/Empirical_Mode_Decomposition_Neuroinformatics/data/BCICompetitionIII/IIIb/desc_IIIb.pdf][data description]] file. Read it know to familiarize with the experiment context and terminology used further.
 
 --------
 *Warning !* 
 Sadly, it turned out that dataset in the paper is DIFFERENT BCI Competition III, not available anymore - check by yourself: http://ida.first.fraunhofer.de/projects/bci/competition_iii/ .
-Dataset we are using here is almost the same. It is described in the website: http://www.bbci.de/competition/iii/#data_set_iiib . This data is no longer sended after submitting download form, however I know somebody that had downloaded it - data with description is available in [[file:/media/michak/DataDrive/science/phd_stud/4_ROK/ANSYG_wspolprowadzenie_TP/EMD_materials/data/BCICompetitionIII.zip][the archive]].
+Dataset we are using here is almost the same. It is described in the website: http://www.bbci.de/competition/iii/#data_set_iiib . This data is no longer sended after submitting download form, however I know somebody that had downloaded it - data with description is available in [[file:/media/michak/DataDrive/porfolio_github/Empirical_Mode_Decomposition_Neuroinformatics/data/BCICompetitionIII.zip][the archive]].
 --------
 
 
